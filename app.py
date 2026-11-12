@@ -2,10 +2,11 @@
 import sys
 import torch
 import numpy as np
-
+import tempfile
+import os
 import streamlit as st
 from pathlib import Path
-
+from AI_Models.Drowsiness.drowsiness_detector import analyze_video
 ROOT = Path(__file__).parent
 sys.path.insert(0, str(ROOT / "AI_Models"))
 from traffic_sign_model import load_traffic_sign_model
@@ -131,11 +132,14 @@ elif page == "AI Analysis":
     st.success("All five AI modules are integrated and ready to use.")
     st.write("Choose an AI module from the sidebar to analyze driving images or videos.")
 
+
 elif page == "Driver Drowsiness Analysis":
+
     st.header("Driver Drowsiness Analysis")
+
     st.write(
-        "Analyze driver eye activity and detect possible "
-        "drowsiness from a driving video."
+        "Analyze driver eye activity and detect "
+        "possible prolonged eye closures."
     )
 
     uploaded_video = st.file_uploader(
@@ -145,8 +149,110 @@ elif page == "Driver Drowsiness Analysis":
     )
 
     if uploaded_video is not None:
+
         st.video(uploaded_video)
-        st.info("Video uploaded successfully. Analysis will be added here.")
+
+        if st.button("Analyze Video", type="primary"):
+
+            progress_bar = st.progress(0)
+
+            temp_video_path = None
+
+            try:
+                with tempfile.NamedTemporaryFile(
+                    delete=False,
+                    suffix=os.path.splitext(
+                        uploaded_video.name
+                    )[1]
+                ) as temp_file:
+
+                    temp_file.write(
+                        uploaded_video.getbuffer()
+                    )
+
+                    temp_video_path = temp_file.name
+
+                with st.spinner(
+                    "Analyzing driver eye activity..."
+                ):
+
+                    results_df, events_df, summary = analyze_video(
+                        temp_video_path,
+                        progress_callback=lambda value:
+                            progress_bar.progress(value)
+                    )
+
+                progress_bar.progress(1.0)
+
+                st.success("Video analysis completed!")
+
+                st.subheader("Analysis Summary")
+
+                col1, col2, col3 = st.columns(3)
+
+                col1.metric(
+                    "Frames Analyzed",
+                    summary["Total Frames"]
+                )
+
+                col2.metric(
+                    "Face Detection Rate",
+                    f'{summary["Face Detection Rate"]}%'
+                )
+
+                col3.metric(
+                    "Closure Events",
+                    summary["Closure Events"]
+                )
+
+                st.metric(
+                    "Longest Eye Closure",
+                    f'{summary["Longest Closure"]} seconds'
+                )
+
+                st.subheader("Eye Activity")
+
+                ear_chart = results_df.dropna(
+                    subset=["EAR"]
+                ).set_index("Time")[["EAR"]]
+
+                if not ear_chart.empty:
+                    st.line_chart(ear_chart)
+
+                st.subheader("Detected Eye Closure Events")
+
+                if not events_df.empty:
+                    st.dataframe(
+                        events_df,
+                        use_container_width=True
+                    )
+                else:
+                    st.info(
+                        "No eye closure events were detected."
+                    )
+
+                st.subheader("Detailed Frame Results")
+
+                st.dataframe(
+                    results_df,
+                    use_container_width=True
+                )
+
+                st.info(
+                    "This is an EAR-based preliminary analysis. "
+                    "Prolonged eye closure is an indicator, not "
+                    "a confirmed diagnosis of driver drowsiness."
+                )
+
+            except Exception as e:
+                st.error(f"Analysis failed: {e}")
+
+            finally:
+                if temp_video_path and os.path.exists(
+                    temp_video_path
+                ):
+                    os.remove(temp_video_path)
+
 
 elif page == "Lane Detection":
     import sqlite3
