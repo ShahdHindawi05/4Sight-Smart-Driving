@@ -1,4 +1,4 @@
-from PIL import Image
+﻿from PIL import Image
 import sys
 import torch
 import numpy as np
@@ -91,6 +91,7 @@ page = st.sidebar.radio(
     [
         "Home",
         "AI Analysis",
+        "Driver Drowsiness Analysis",
         "Seatbelt Detection",
         "Traffic Sign Recognition",
         "Lane Detection",
@@ -130,6 +131,22 @@ elif page == "AI Analysis":
     st.success("All five AI modules are integrated and ready to use.")
     st.write("Choose an AI module from the sidebar to analyze driving images or videos.")
 
+elif page == "Driver Drowsiness Analysis":
+    st.header("Driver Drowsiness Analysis")
+    st.write(
+        "Analyze driver eye activity and detect possible "
+        "drowsiness from a driving video."
+    )
+
+    uploaded_video = st.file_uploader(
+        "Upload Driving Video",
+        type=["mp4", "avi", "mov"],
+        key="drowsiness_video"
+    )
+
+    if uploaded_video is not None:
+        st.video(uploaded_video)
+        st.info("Video uploaded successfully. Analysis will be added here.")
 
 elif page == "Lane Detection":
     import sqlite3
