@@ -8,3 +8,4 @@ mediapipe==1.2.3
 opencv-contrib-python==5.0.0.93
 pandas
 streamlit-image-coordinates==0.4.1
+imageio-ffmpeg
