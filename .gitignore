@@ -19,3 +19,20 @@ Datasets/Seatbelt.v1i.yolov8/**
 !Datasets/Seatbelt.v1i.yolov8/runs/seatbelt_detection/
 !Datasets/Seatbelt.v1i.yolov8/runs/seatbelt_detection/weights/
 !Datasets/Seatbelt.v1i.yolov8/runs/seatbelt_detection/weights/best.pt
+# Temporary analysis outputs
+*.csv
+*.png
+*.jpg
+*.jpeg
+
+# YOLO model
+yolov8n.pt
+
+# Local backup
+app_with_speed_backup.py
+
+# Generated result folders
+Mirror_Usage/streamlit_results/
+Mirror_Usage/results/
+Phone_Usage/results/
+Speed_Control/results/

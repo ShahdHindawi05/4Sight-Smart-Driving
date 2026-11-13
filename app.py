@@ -5,8 +5,12 @@ import numpy as np
 import tempfile
 import os
 import streamlit as st
+import subprocess
+import imageio_ffmpeg
 from pathlib import Path
 from AI_Models.Drowsiness.drowsiness_detector import analyze_video
+from Mirror_Usage.mirror_analysis import analyze_video as analyze_mirror_video
+from Phone_Usage.phone_analysis import analyze_video as analyze_phone_video
 ROOT = Path(__file__).parent
 sys.path.insert(0, str(ROOT / "AI_Models"))
 from traffic_sign_model import load_traffic_sign_model
@@ -93,6 +97,9 @@ page = st.sidebar.radio(
         "Home",
         "AI Analysis",
         "Driver Drowsiness Analysis",
+        "Mirror Usage",
+        "Phone Usage Detection",
+        "Speed Control",
         "Seatbelt Detection",
         "Traffic Sign Recognition",
         "Lane Detection",
@@ -113,24 +120,25 @@ if page == "Home":
 
     st.markdown("### Available AI Modules")
 
+    modules = [
+        ("🚗 Speed Control", "Vehicle tracking and movement analysis"),
+        ("🪞 Mirror Usage", "Driver mirror and head movement analysis"),
+        ("📱 Phone Usage Detection", "Detecting mobile phones in video"),
+        ("🛣️ Lane Detection", "Detecting road lanes"),
+        ("🚦 Traffic Sign Recognition", "Recognizing traffic signs"),
+        ("🛡️ Seatbelt Detection", "Detecting seatbelt usage"),
+        ("🚘 Safe Following Distance", "Analyzing distance between vehicles"),
+        ("😴 Driver Drowsiness Analysis", "Monitoring driver alertness"),
+    ]
+
     col1, col2 = st.columns(2)
 
-    with col1:
-        st.info("Traffic Sign Recognition")
-        st.info("Lane Detection")
-    with col2:
-        st.info("Seatbelt Detection")
-        st.info("Vehicle Detection")
-        st.info("Safe Following Distance")
+    for index, (name, description) in enumerate(modules):
+        with (col1 if index % 2 == 0 else col2):
+            st.info(f"**{name}**\n\n{description}")
 
     st.markdown("---")
     st.success("Welcome! Your Smart Driving System is ready.")
-
-elif page == "AI Analysis":
-    st.header("AI Analysis")
-    st.write("Analyze driving images and videos using AI models.")
-    st.success("All five AI modules are integrated and ready to use.")
-    st.write("Choose an AI module from the sidebar to analyze driving images or videos.")
 
 
 elif page == "Driver Drowsiness Analysis":
@@ -252,6 +260,569 @@ elif page == "Driver Drowsiness Analysis":
                     temp_video_path
                 ):
                     os.remove(temp_video_path)
+
+elif page == "Mirror Usage":
+
+    st.header("Mirror Usage Analysis")
+
+    st.write(
+        "Upload a driving video to analyze possible "
+        "side-looking head movements."
+    )
+
+    st.warning(
+        "This module estimates head rotation. "
+        "It does not confirm that the driver actually used a mirror."
+    )
+
+    uploaded_mirror_video = st.file_uploader(
+        "Upload Driving Video",
+        type=["mp4", "avi", "mov"],
+        key="mirror_usage_video"
+    )
+
+    if uploaded_mirror_video is not None:
+
+        st.video(uploaded_mirror_video)
+
+        if st.button("Analyze Mirror Usage", type="primary"):
+
+            temp_video_path = None
+
+            try:
+                # Save uploaded video temporarily
+                with tempfile.NamedTemporaryFile(
+                    delete=False,
+                    suffix=Path(uploaded_mirror_video.name).suffix
+                ) as temp_file:
+
+                    temp_file.write(
+                        uploaded_mirror_video.getbuffer()
+                    )
+
+                    temp_video_path = temp_file.name
+
+                output_dir = (
+                    ROOT / "Mirror_Usage" / "streamlit_results"
+                )
+
+                with st.spinner(
+                    "Analyzing head movements..."
+                ):
+
+                    results_df, events_df, output_video = (
+                        analyze_mirror_video(
+                            temp_video_path,
+                            output_dir=output_dir
+                        )
+                    )
+
+                st.success("Mirror Usage Analysis Completed!")
+
+                st.subheader("Analysis Summary")
+
+                col1, col2, col3 = st.columns(3)
+
+                col1.metric(
+                    "Samples Analyzed",
+                    len(results_df)
+                )
+
+                col2.metric(
+                    "Faces Detected",
+                    int(results_df["face_detected"].sum())
+                )
+
+                col3.metric(
+                    "Possible Side-Looking Events",
+                    len(events_df)
+                )
+
+                if not events_df.empty:
+
+                    st.subheader("Possible Side-Looking Events")
+
+                    st.dataframe(
+                        events_df,
+                        use_container_width=True
+                    )
+
+                    total_duration = events_df[
+                        "duration_seconds"
+                    ].sum()
+
+                    st.metric(
+                        "Total Possible Side-Looking Duration",
+                        f"{total_duration} seconds"
+                    )
+
+                else:
+                    st.info(
+                        "No possible side-looking events were detected."
+                    )
+
+                st.subheader("Head Rotation Analysis")
+
+                chart_data = (
+                    results_df.dropna(
+                        subset=["yaw_smooth"]
+                    )
+                    .set_index("time_seconds")[["yaw_smooth"]]
+                )
+
+                if not chart_data.empty:
+                    st.line_chart(chart_data)
+
+                
+                st.subheader("Processed Video")
+
+                if Path(output_video).exists():
+
+                    browser_video_path = (
+                        Path(output_video).parent
+                        / "mirror_head_pose_browser.mp4"
+                    )
+
+                    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+
+                    command = [
+                        ffmpeg_exe,
+                        "-y",
+                        "-i", str(output_video),
+                        "-c:v", "libx264",
+                        "-pix_fmt", "yuv420p",
+                        "-movflags", "+faststart",
+                        "-an",
+                        str(browser_video_path)
+                    ]
+
+                    with st.spinner("Preparing video for browser..."):
+
+                        result = subprocess.run(
+                            command,
+                            capture_output=True,
+                            text=True
+                        )
+
+                    if result.returncode == 0:
+                        st.video(str(browser_video_path))
+                    else:
+                        st.error("Video conversion failed.")
+                        st.code(result.stderr[-2000:])
+
+                else:
+                    st.warning("Processed video file was not found.")
+
+                st.subheader("Detailed Results")
+
+                st.dataframe(
+                    results_df,
+                    use_container_width=True
+                )
+
+                st.download_button(
+                    "Download Mirror Analysis CSV",
+                    data=results_df.to_csv(
+                        index=False
+                    ).encode("utf-8-sig"),
+                    file_name="mirror_analysis.csv",
+                    mime="text/csv"
+                )
+
+
+                st.download_button(
+                    "Download Events Report CSV",
+                    data=events_df.to_csv(
+                        index=False
+                    ).encode("utf-8-sig"),
+                    file_name="mirror_events.csv",
+                    mime="text/csv"
+                )
+
+            except Exception as error:
+                st.error(
+                    f"Mirror Usage analysis failed: {error}"
+                )
+
+            finally:
+                if (
+                    temp_video_path
+                    and Path(temp_video_path).exists()
+                ):
+                    Path(temp_video_path).unlink()
+
+
+elif page == "Phone Usage Detection":
+
+    st.header("Phone Usage Detection")
+
+    st.write(
+        "Upload a driving video to detect possible "
+        "cell phone appearances."
+    )
+
+    st.warning(
+        "Phone detection does not prove that the driver "
+        "used the phone. All detections require human review."
+    )
+
+    uploaded_phone_video = st.file_uploader(
+        "Upload Driving Video",
+        type=["mp4", "avi", "mov"],
+        key="phone_usage_video"
+    )
+
+    if uploaded_phone_video is not None:
+
+        st.video(uploaded_phone_video)
+
+        if st.button("Analyze Phone Usage", type="primary"):
+
+            temp_video_path = None
+
+            try:
+                with tempfile.NamedTemporaryFile(
+                    delete=False,
+                    suffix=Path(uploaded_phone_video.name).suffix
+                ) as temp_file:
+
+                    temp_file.write(
+                        uploaded_phone_video.getbuffer()
+                    )
+
+                    temp_video_path = temp_file.name
+
+                output_dir = (
+                    ROOT / "Phone_Usage" / "results"
+                )
+
+                with st.spinner(
+                    "Detecting possible cell phones..."
+                ):
+
+                    report, output_video, csv_path = (
+                        analyze_phone_video(
+                            temp_video_path,
+                            output_dir=output_dir
+                        )
+                    )
+
+                st.success("Phone Detection Completed!")
+
+                st.subheader("Detection Summary")
+
+                col1, col2 = st.columns(2)
+
+                col1.metric(
+                    "Detection Seconds",
+                    len(report)
+                )
+
+                col2.metric(
+                    "Average Detection Confidence",
+                    (
+                        f"{report['Confidence'].mean():.2f}"
+                        if not report.empty
+                        else "N/A"
+                    )
+                )
+
+                if not report.empty:
+
+                    st.subheader("Possible Phone Detections")
+
+                    st.dataframe(
+                        report,
+                        use_container_width=True
+                    )
+
+                    st.warning(
+                        "These are possible detections, "
+                        "not confirmed driving violations."
+                    )
+
+                else:
+                    st.info(
+                        "No cell phone detections were found."
+                    )
+
+                st.subheader("Processed Video")
+
+                browser_video_path = (
+                    Path(output_video).parent
+                    / "phone_detection_browser.mp4"
+                )
+
+                ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+
+                command = [
+                    ffmpeg_exe,
+                    "-y",
+                    "-i", str(output_video),
+                    "-c:v", "libx264",
+                    "-pix_fmt", "yuv420p",
+                    "-movflags", "+faststart",
+                    "-an",
+                    str(browser_video_path)
+                ]
+
+                with st.spinner(
+                    "Preparing video for browser..."
+                ):
+
+                    conversion = subprocess.run(
+                        command,
+                        capture_output=True,
+                        text=True
+                    )
+
+                if conversion.returncode == 0:
+                    st.video(str(browser_video_path))
+                else:
+                    st.error("Video conversion failed.")
+                    st.code(conversion.stderr[-2000:])
+
+                st.download_button(
+                    "Download Phone Detection Report",
+                    data=report.to_csv(
+                        index=False
+                    ).encode("utf-8-sig"),
+                    file_name="phone_events.csv",
+                    mime="text/csv"
+                )
+
+            except Exception as error:
+                st.error(
+                    f"Phone Usage analysis failed: {error}"
+                )
+
+            finally:
+                if (
+                    temp_video_path
+                    and Path(temp_video_path).exists()
+                ):
+                    Path(temp_video_path).unlink()
+
+elif page == "Speed Control":
+
+    import pandas as pd
+    import tempfile
+    import os
+
+    from Speed_Control.speed_tracker import (
+        analyze_video as analyze_speed_video
+    )
+
+    st.header("🚗 Speed Control")
+
+    st.write(
+        "Upload a driving video to detect and track vehicles."
+    )
+
+    st.warning(
+        "The system currently calculates movement in pixels per second. "
+        "Real speed in km/h requires road calibration."
+    )
+
+    uploaded_video_file = st.file_uploader(
+        "Upload Driving Video",
+        type=["mp4", "avi", "mov"],
+        key="speed_video_upload"
+    )
+
+    if uploaded_video_file is not None:
+
+        st.success(
+            f"Uploaded: {uploaded_video_file.name}"
+        )
+
+        if st.button(
+            "Analyze Vehicle Speed",
+            type="primary"
+        ):
+
+            temp_video_path = None
+
+            try:
+
+                suffix = os.path.splitext(
+                    uploaded_video_file.name
+                )[1]
+
+                with tempfile.NamedTemporaryFile(
+                    delete=False,
+                    suffix=suffix
+                ) as temp_file:
+
+                    temp_file.write(
+                        uploaded_video_file.getbuffer()
+                    )
+
+                    temp_video_path = temp_file.name
+
+                with st.spinner(
+                    "Detecting and tracking vehicles..."
+                ):
+
+                    result = analyze_speed_video(
+                        temp_video_path
+                    )
+
+                st.success("Vehicle tracking completed!")
+
+                st.warning(
+                    "Real speed in km/h is not available yet. "
+                    "The road calibration distance is experimental."
+                )
+
+                st.info(
+                    "The system currently measures vehicle movement "
+                    "in pixels per second, not real-world speed."
+                )
+
+                tracking_df = result["tracking_data"]
+                st.subheader("Vehicle Movement Summary")
+
+                valid_tracks = tracking_df.dropna(
+                    subset=["Track_ID"]
+                )
+
+                if not valid_tracks.empty:
+                    summary = (
+                        valid_tracks.groupby("Track_ID")
+                        .agg(
+                            Detection_Count=("Frame", "count"),
+                            First_Seen=("Time", "min"),
+                            Last_Seen=("Time", "max"),
+                            Average_Pixel_Speed=(
+                                "Pixel_Speed_Per_Second", "mean"
+                            )
+                        )
+                        .reset_index()
+                    )
+
+                    summary["Duration_Seconds"] = (
+                        summary["Last_Seen"] - summary["First_Seen"]
+                    ).round(2)
+
+                    summary["Average_Pixel_Speed"] = (
+                        summary["Average_Pixel_Speed"].round(2)
+                    )
+
+                    st.dataframe(
+                        summary,
+                        use_container_width=True
+                    )
+                else:
+                    st.info("No vehicle tracking IDs were available.")
+                col1, col2, col3 = st.columns(3)
+
+                col1.metric(
+                    "Frames Processed",
+                    result["frames_processed"]
+                )
+
+                col2.metric(
+                    "Vehicle Detections",
+                    len(tracking_df)
+                )
+
+                col3.metric(
+                    "Video FPS",
+                    round(result["fps"], 2)
+                )
+
+                st.subheader("Tracked Video")
+
+                
+
+
+                h264_video_path = os.path.join(
+                    os.path.dirname(result["video_path"]),
+                    "tracked_video_h264.mp4"
+                )
+
+                ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+
+                subprocess.run(
+                    [
+                        ffmpeg_exe,
+                        "-y",
+                        "-i", result["video_path"],
+                        "-vcodec", "libx264",
+                        "-pix_fmt", "yuv420p",
+                        "-movflags", "+faststart",
+                        "-an",
+                        h264_video_path
+                    ],
+                    check=True,
+                    capture_output=True
+                )
+
+                st.video(h264_video_path)
+
+
+
+                st.subheader("Vehicle Tracking Data")
+
+                st.dataframe(
+                    tracking_df,
+                    use_container_width=True
+                )
+
+                st.subheader(
+                    "Vehicle Movement (Pixels per Second)"
+                )
+
+                movement_df = tracking_df[
+                    ["Time", "Pixel_Speed_Per_Second"]
+                ].dropna()
+
+                if not movement_df.empty:
+
+                    movement_df = movement_df.set_index("Time")
+
+                    st.line_chart(movement_df)
+
+                else:
+
+                    st.info(
+                        "Not enough tracking points to calculate movement."
+                    )
+
+                st.download_button(
+                    "Download Tracking CSV",
+                    data=tracking_df.to_csv(
+                        index=False
+                    ).encode("utf-8-sig"),
+                    file_name="4Sight_Vehicle_Tracking.csv",
+                    mime="text/csv"
+                )
+
+                st.info(
+                    "This is pixel movement, not actual km/h. "
+                    "Road calibration is required for real-world speed."
+                )
+
+            except Exception as error:
+
+                st.error(
+                    f"Video analysis failed: {error}"
+                )
+
+            finally:
+
+                if (
+                    temp_video_path
+                    and os.path.exists(temp_video_path)
+                ):
+                    os.remove(temp_video_path)
+
+    else:
+
+        st.info(
+            "Please upload a driving video to begin."
+        )
 
 
 elif page == "Lane Detection":
@@ -377,10 +948,22 @@ elif page == "Traffic Sign Recognition":
             row[1] for row in
             conn.execute("PRAGMA table_info(driving_reports)").fetchall()
         ]
+
         if "score" not in columns:
             conn.execute(
                 "ALTER TABLE driving_reports ADD COLUMN score INTEGER DEFAULT 0"
             )
+
+        if "detected_errors" not in columns:
+            conn.execute(
+                "ALTER TABLE driving_reports ADD COLUMN detected_errors TEXT"
+            )
+
+        if "recommendations" not in columns:
+            conn.execute(
+                "ALTER TABLE driving_reports ADD COLUMN recommendations TEXT"
+            )
+
         drivers = conn.execute(
             "SELECT id, name FROM drivers ORDER BY name"
         ).fetchall()
@@ -518,6 +1101,15 @@ elif page == "Seatbelt Detection":
             conn.execute(
                 "ALTER TABLE driving_reports ADD COLUMN score INTEGER DEFAULT 0"
             )
+        if "detected_errors" not in columns:
+            conn.execute(
+                "ALTER TABLE driving_reports ADD COLUMN detected_errors TEXT"
+            )
+
+        if "recommendations" not in columns:
+            conn.execute(
+                "ALTER TABLE driving_reports ADD COLUMN recommendations TEXT"
+            )
 
         drivers = conn.execute(
             "SELECT id, name FROM drivers ORDER BY name"
@@ -598,19 +1190,31 @@ elif page == "Seatbelt Detection":
 
                         with sqlite3.connect(db_path) as conn:
                             conn.execute(
-                                """
-                                INSERT INTO driving_reports
-                                (driver_id, module, result, notes, report_date)
-                                VALUES (?, ?, ?, ?, ?)
-                                """,
-                                (
-                                    selected_driver_id,
-                                    "Seatbelt Detection",
-                                    result_summary,
-                                    f"Automatically saved from image: {uploaded_file.name}",
-                                    datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                )
-                            )
+    """
+    INSERT INTO driving_reports
+    (
+        driver_id,
+        module,
+        result,
+        notes,
+        report_date,
+        score,
+        detected_errors,
+        recommendations
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """,
+    (
+        selected_driver_id,
+        "Seatbelt Detection",
+        result_summary,
+        f"Automatically saved from image: {uploaded_file.name}",
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        0,
+        "",
+        ""
+    )
+)
 
                         st.success("Report saved automatically in Reports!")
 
@@ -955,6 +1559,7 @@ elif page == "Safe Following Distance":
                 if temp_video_path and Path(temp_video_path).exists():
                     Path(temp_video_path).unlink()
 
+
 elif page == "Users":
     import sqlite3
 
@@ -1139,6 +1744,15 @@ elif page == "Reports":
             conn.execute(
                 "ALTER TABLE driving_reports ADD COLUMN score INTEGER DEFAULT 0"
             )
+        if "detected_errors" not in report_columns:
+            conn.execute(
+                "ALTER TABLE driving_reports ADD COLUMN detected_errors TEXT"
+            )
+
+        if "recommendations" not in report_columns:
+            conn.execute(
+                "ALTER TABLE driving_reports ADD COLUMN recommendations TEXT"
+            )
 
         drivers = conn.execute(
             "SELECT id, name FROM drivers ORDER BY name"
@@ -1191,6 +1805,15 @@ elif page == "Reports":
             result_summary = st.text_area(
                 "Analysis Result Summary",
                 placeholder="Describe the result of the analysis..."
+            )
+            detected_errors = st.text_area(
+                "Detected Driving Errors",
+                placeholder="List the mistakes detected during driving..."
+            )
+
+            recommendations = st.text_area(
+                "Recommendations",
+                placeholder="Suggestions to improve driving performance..."
             )
 
             report_notes = st.text_area(
