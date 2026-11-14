@@ -88,29 +88,55 @@ st.subheader("AI-Powered Smart Driving Monitoring System")
 
 st.markdown("---")
 
-# Sidebar
-st.sidebar.title("Navigation")
+# Sidebar Navigation
+if "current_page" not in st.session_state:
+    st.session_state.current_page = "Home"
 
-page = st.sidebar.radio(
-    "Choose a page:",
-    [
-        "Home",
-        "AI Analysis",
-        "Driver Drowsiness Analysis",
-        "Mirror Usage",
-        "Phone Usage Detection",
-        "Speed Control",
-        "Seatbelt Detection",
-        "Traffic Sign Recognition",
-        "Lane Detection",
-        "Vehicle Detection",
-        "Safe Following Distance",
-        "Users",
-        "Reports",
-        "About"
-    ]
-)
+page = st.session_state.current_page
 
+st.sidebar.markdown("""
+<div style="text-align:center; padding:15px 0 25px 0;">
+    <h1 style="color:#f0f4fa; margin:0;">4Sight 🚘</h1>
+</div>
+<hr>
+""", unsafe_allow_html=True)
+
+
+def navigation_item(label, target):
+    if st.sidebar.button(
+        label,
+        key=f"nav_{target}",
+        use_container_width=True,
+        type="primary" if page == target else "secondary"
+    ):
+        st.session_state.current_page = target
+        st.rerun()
+
+
+st.sidebar.markdown("### OVERVIEW")
+navigation_item("▦ Dashboard", "Home")
+navigation_item("◎ AI Analysis", "AI Analysis")
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("### DRIVING SKILLS")
+
+navigation_item("🚘 Speed Control", "Speed Control")
+navigation_item("🪞 Mirror Usage", "Mirror Usage")
+navigation_item("📱 Phone Detection", "Phone Usage Detection")
+navigation_item("🛣️ Lane Detection", "Lane Detection")
+navigation_item("🛡️ Seatbelt Detection", "Seatbelt Detection")
+navigation_item("😴 Driver Drowsiness", "Driver Drowsiness Analysis")
+navigation_item("🚦 Traffic Sign Recognition", "Traffic Sign Recognition")
+navigation_item("🚗 Vehicle Detection", "Vehicle Detection")
+navigation_item("↔ Safe Following Distance", "Safe Following Distance")
+navigation_item("🛡️ Driver Assessment", "Driver Assessment")
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("### MANAGEMENT")
+
+navigation_item("♙ Users", "Users")
+navigation_item("▤ Reports", "Reports")
+navigation_item("ⓘ About", "About")
 if page == "Home":
     st.header("Welcome to 4Sight!")
     st.write(
@@ -526,15 +552,51 @@ elif page == "Phone Usage Detection":
                         else "N/A"
                     )
                 )
-
                 if not report.empty:
 
                     st.subheader("Possible Phone Detections")
 
-                    st.dataframe(
-                        report,
-                        use_container_width=True
-                    )
+                    for index, row in report.iterrows():
+
+                        with st.container(border=True):
+
+                            st.markdown(
+                                f"### 📱 Phone Detection {index + 1}"
+                            )
+
+                            col1, col2 = st.columns(2)
+
+                            col1.metric(
+                                "Detection Time",
+                                f"{row['Time (sec)']} sec"
+                            )
+
+                            col2.metric(
+                                "Confidence",
+                                f"{row['Confidence']:.0%}"
+                            )
+
+                            st.warning("Needs Review")
+
+                    st.subheader("Visual Review of Phone Detections")
+
+                    for _, row in report.iterrows():
+
+                        st.write(
+                            f"Detection at {row['Time (sec)']} seconds"
+                        )
+
+                        image_path = row.get("Review Image", "")
+
+                        if image_path and Path(image_path).exists():
+                            st.image(
+                                image_path,
+                                width=400
+                            )
+                        else:
+                            st.warning(
+                                "Review image not available."
+                            )
 
                     st.warning(
                         "These are possible detections, "
@@ -542,6 +604,7 @@ elif page == "Phone Usage Detection":
                     )
 
                 else:
+
                     st.info(
                         "No cell phone detections were found."
                     )
@@ -596,12 +659,13 @@ elif page == "Phone Usage Detection":
                     f"Phone Usage analysis failed: {error}"
                 )
 
-            finally:
+            finally:      
                 if (
                     temp_video_path
                     and Path(temp_video_path).exists()
                 ):
                     Path(temp_video_path).unlink()
+
 
 elif page == "Speed Control":
 
@@ -674,7 +738,6 @@ elif page == "Speed Control":
                     "Real speed in km/h is not available yet. "
                     "The road calibration distance is experimental."
                 )
-
                 st.info(
                     "The system currently measures vehicle movement "
                     "in pixels per second, not real-world speed."
@@ -1558,6 +1621,376 @@ elif page == "Safe Following Distance":
 
                 if temp_video_path and Path(temp_video_path).exists():
                     Path(temp_video_path).unlink()
+
+
+elif page == "Driver Assessment":
+    from Speed_Control.speed_tracker import analyze_video as analyze_speed_video
+
+    st.header("🚗 Automatic Driver Assessment")
+    st.write("Upload one driving video to analyze multiple driving safety indicators.")
+
+    uploaded_assessment_video = st.file_uploader(
+        "📂 Upload Driving Video",
+        type=["mp4", "mov", "avi", "mkv"],
+        key="driver_assessment_video"
+    )
+
+    if uploaded_assessment_video is not None:
+        st.success("Video uploaded successfully!")
+        st.write("Video name:", uploaded_assessment_video.name)
+        st.video(uploaded_assessment_video)
+
+        if st.button("🚀 Start Assessment", key="start_driver_assessment"):
+
+            assessment_root = ROOT / "Assessment_Results"
+            assessment_root.mkdir(parents=True, exist_ok=True)
+
+            run_dir = Path(
+                tempfile.mkdtemp(
+                    prefix="assessment_",
+                    dir=str(assessment_root)
+                )
+            )
+
+            video_path = run_dir / (
+                "input" + Path(uploaded_assessment_video.name).suffix
+            )
+
+            video_path.write_bytes(
+                uploaded_assessment_video.getvalue()
+            )
+
+            results = {}
+            statuses = []
+
+            # 1. Mirror Usage Analysis
+            try:
+                with st.spinner("Analyzing mirror and head movements..."):
+                    output_dir = run_dir / "mirror"
+                    mirror_data, mirror_events, mirror_video = (
+                        analyze_mirror_video(
+                            str(video_path),
+                            output_dir=str(output_dir)
+                        )
+                    )
+
+                    results["Mirror Usage"] = {
+                        "data": mirror_data,
+                        "events": mirror_events,
+                        "video": mirror_video
+                    }
+
+                statuses.append(("Mirror Usage", True, None))
+
+            except Exception as error:
+                statuses.append(("Mirror Usage", False, str(error)))
+
+            # 2. Phone Usage Detection
+            try:
+                with st.spinner("Detecting visible phones..."):
+                    output_dir = run_dir / "phone"
+
+                    phone_report, phone_video, phone_csv = (
+                        analyze_phone_video(
+                            str(video_path),
+                            output_dir=str(output_dir)
+                        )
+                    )
+
+                    results["Phone Usage"] = {
+                        "report": phone_report,
+                        "video": str(phone_video),
+                        "csv": str(phone_csv)
+                    }
+
+                statuses.append(("Phone Usage", True, None))
+
+            except Exception as error:
+                statuses.append(("Phone Usage", False, str(error)))
+
+            # 3. Speed and Vehicle Tracking
+            try:
+                with st.spinner("Tracking vehicles..."):
+                    output_dir = run_dir / "speed"
+
+                    speed_results = analyze_speed_video(
+                        str(video_path),
+                        output_dir=str(output_dir)
+                    )
+
+                    results["Speed Control"] = speed_results
+
+                statuses.append(("Speed Control", True, None))
+
+            except Exception as error:
+                statuses.append(("Speed Control", False, str(error)))
+
+            # 4. Driver Drowsiness Analysis
+            try:
+                with st.spinner("Analyzing driver drowsiness..."):
+                    drowsiness_data, drowsiness_events, drowsiness_summary = (
+                        analyze_video(str(video_path))
+                    )
+
+                    results["Drowsiness"] = {
+                        "data": drowsiness_data,
+                        "events": drowsiness_events,
+                        "summary": drowsiness_summary
+                    }
+
+                statuses.append(("Drowsiness", True, None))
+
+            except Exception as error:
+                statuses.append(("Drowsiness", False, str(error)))
+
+            # Display analysis status
+            st.markdown("---")
+            st.subheader("📊 Assessment Results")
+
+            for name, completed, error in statuses:
+                if completed:
+                    st.success(f"✅ {name}: Completed")
+                else:
+                    st.error(f"❌ {name}: Failed")
+                    st.caption(str(error))
+
+            # Mirror results
+            if "Mirror Usage" in results:
+                st.subheader("🪞 Mirror and Head Movement")
+                mirror_events = results["Mirror Usage"]["events"]
+
+                st.metric(
+                    "Possible Side-Looking Events",
+                    len(mirror_events)
+                )
+
+                st.dataframe(mirror_events, use_container_width=True)
+
+            # Phone results
+            if "Phone Usage" in results:
+                st.subheader("📱 Phone Detection")
+                phone_report = results["Phone Usage"]["report"]
+
+                st.dataframe(
+                    phone_report.head(30),
+                    use_container_width=True
+                )
+
+                st.subheader("📸 Phone Detection Images")
+
+                for _, row in phone_report.head(10).iterrows():
+                    image_path = row.get("Review Image", "")
+
+                    if image_path and Path(image_path).exists():
+                        st.image(image_path, width=400)
+                    else:
+                        st.warning("Review image not available.")
+
+                st.caption(
+                    "Visible phone detection does not prove that "
+                    "the driver was using the phone."
+                )
+
+            # Speed results
+            if "Speed Control" in results:
+                st.subheader("🚘 Vehicle Tracking")
+                tracking_data = results["Speed Control"]["tracking_data"]
+
+                st.metric(
+                    "Tracked Vehicle Records",
+                    len(tracking_data)
+                )
+
+                st.dataframe(
+                    tracking_data.head(30),
+                    use_container_width=True
+                )
+
+                st.caption(
+                    "Movement is measured in pixels per second, "
+                    "not verified real-world speed."
+                )
+
+            # Drowsiness results
+            if "Drowsiness" in results:
+                st.subheader("😴 Driver Drowsiness")
+
+                summary = results["Drowsiness"]["summary"]
+                drowsiness_events = results["Drowsiness"]["events"]
+
+                col1, col2, col3 = st.columns(3)
+
+                col1.metric(
+                    "Face Detection Rate",
+                    f"{summary['Face Detection Rate']}%"
+                )
+
+                col2.metric(
+                    "Closure Events",
+                    summary["Closure Events"]
+                )
+
+                col3.metric(
+                    "Longest Eye Closure",
+                    f"{summary['Longest Closure']} sec"
+                )
+
+                st.dataframe(
+                    drowsiness_events,
+                    use_container_width=True
+                )
+
+
+
+
+
+
+            # Comprehensive Driver Safety Scoring
+
+            weights = {
+                "Drowsiness": 30,
+                "Phone Usage": 30,
+                "Mirror Usage": 20,
+                "Speed Control": 20
+            }
+
+            scores = {}
+            deductions = {}
+
+            # 1. Drowsiness: 5 points per prolonged closure
+            if "Drowsiness" in results:
+                events = results["Drowsiness"]["events"]
+
+                prolonged = 0
+
+                if (
+                    not events.empty
+                    and "Possible Prolonged Closure" in events.columns
+                ):
+                    prolonged = int(
+                        events["Possible Prolonged Closure"]
+                        .fillna(False)
+                        .astype(bool)
+                        .sum()
+                    )
+
+                deduction = min(prolonged * 5, 30)
+
+                scores["Drowsiness"] = 30 - deduction
+                deductions["Drowsiness"] = deduction
+
+            # 2. Phone Usage: 3 points per detected second
+            if "Phone Usage" in results:
+                report = results["Phone Usage"]["report"]
+
+                phone_detections = len(report)
+                st.write("عدد صفوف تقرير الهاتف:", len(report))
+                deduction = min(phone_detections * 3, 30)
+
+                scores["Phone Usage"] = 30 - deduction
+                deductions["Phone Usage"] = deduction
+
+            # 3. Mirror Usage: 5 points per side-looking event
+            if "Mirror Usage" in results:
+                events = results["Mirror Usage"]["events"]
+
+                mirror_events_count = len(events)
+                deduction = min(mirror_events_count * 5, 20)
+
+                scores["Mirror Usage"] = 20 - deduction
+                deductions["Mirror Usage"] = deduction
+
+            # 4. Speed Control
+            # Real-world speed scoring requires verified calibration.
+            speed_pending = True
+
+            if (
+                "Speed Control" in results
+                and results["Speed Control"].get("calibration_status")
+                and "verified" in str(
+                    results["Speed Control"]["calibration_status"]
+                ).lower()
+            ):
+                speed_pending = False
+
+                # Keep speed scoring pending until a verified
+                # speed measurement and limit are available.
+                speed_pending = True
+
+            st.markdown("---")
+            st.subheader("🏆 Driver Safety Score")
+
+            st.markdown("### Individual Task Scores")
+
+            task_labels = {
+                "Drowsiness": "😴 Drowsiness",
+                "Phone Usage": "📱 Phone Usage",
+                "Mirror Usage": "🪞 Mirror Usage",
+                "Speed Control": "🚘 Speed Control"
+            }
+
+            for task, maximum in weights.items():
+
+                if task in scores:
+                    st.metric(
+                        task_labels[task],
+                        f"{scores[task]}/{maximum}",
+                        delta=f"-{deductions[task]} points",
+                        delta_color="inverse"
+                    )
+                else:
+                    st.warning(
+                        f"{task_labels[task]}: Not evaluated"
+                    )
+
+            # Calculate score using evaluated tasks only
+            earned_points = sum(scores.values())
+            evaluated_maximum = sum(
+                weights[task] for task in scores
+            )
+
+            st.markdown("---")
+
+            if evaluated_maximum > 0:
+
+                final_score = round(
+                    earned_points / evaluated_maximum * 100
+                )
+
+                st.metric(
+                    "Overall Driver Safety Score",
+                    f"{final_score}/100"
+                )
+
+                st.caption(
+                    f"Based on {evaluated_maximum} evaluated "
+                    "points out of 100."
+                )
+
+            else:
+                st.warning(
+                    "No tasks were successfully evaluated."
+                )
+
+            if speed_pending:
+                st.warning(
+                    "Speed Control is not included because "
+                    "real-world speed calibration is not verified."
+                )
+
+            st.info(
+                "This is an experimental scoring system. "
+                "Phone detections and head movements are preliminary "
+                "indicators and may require human review."
+            )
+
+            st.success(
+                f"Analysis files saved in: {run_dir}"
+            )
+
+            if video_path.exists():
+                video_path.unlink()
+
 
 
 elif page == "Users":

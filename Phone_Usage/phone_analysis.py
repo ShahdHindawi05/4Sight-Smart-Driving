@@ -1,6 +1,4 @@
-
 from pathlib import Path
-
 import cv2
 import pandas as pd
 from ultralytics import YOLO
@@ -71,7 +69,11 @@ def analyze_video(video_path, output_dir=None):
         cap.release()
         raise ValueError("Could not create output video.")
 
-    events = {}
+    events = []
+
+    review_dir = output_dir / "phone_review_frames"
+    review_dir.mkdir(parents=True, exist_ok=True)
+
     frame_number = 0
     frame_interval = 5
 
@@ -88,7 +90,7 @@ def analyze_video(video_path, output_dir=None):
 
                 results = model.predict(
                     frame,
-                    conf=0.25,
+                    conf=0.70,
                     verbose=False
                 )
 
@@ -103,10 +105,6 @@ def analyze_video(video_path, output_dir=None):
 
                     second = int(frame_number / fps)
 
-                    events[second] = max(
-                        events.get(second, 0),
-                        confidence
-                    )
 
                     x1, y1, x2, y2 = map(
                         int,
@@ -130,26 +128,30 @@ def analyze_video(video_path, output_dir=None):
                         (0, 255, 0),
                         2
                     )
+                    image_name = f"frame_{frame_number}_phone.jpg"
+                    image_path = review_dir / image_name
 
+                    cv2.imwrite(str(image_path), frame)
+
+
+                    events.append({
+                        "Time (sec)": second,
+                        "Detected Object": "تم اكتشاف هاتف",
+                        "Confidence": round(confidence, 2),
+                        "Status": "Needs Review",
+                        "Review Image": str(image_path)
+                    })
             writer.write(frame)
             frame_number += 1
 
+    
     finally:
-        cap.release()
-        writer.release()
+            cap.release()
+    writer.release()
 
-    report = pd.DataFrame([
-        {
-            "Time (sec)": second,
-            "Detected Object": "تم اكتشاف هاتف",
-            "Confidence": round(confidence, 2),
-            "Status": "Needs Review"
-        }
-        for second, confidence in sorted(events.items())
-    ])
+    report = pd.DataFrame(events)
 
     csv_path = output_dir / "phone_events.csv"
-
     report.to_csv(
         csv_path,
         index=False,
